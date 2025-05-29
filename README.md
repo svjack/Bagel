@@ -1,5 +1,99 @@
 # Refer to https://huggingface.co/meimeilook/BAGEL-7B-MoT-FP8
 
+vim run_edit.py
+```python
+from datasets import load_dataset
+from gradio_client import Client, handle_file
+from PIL import Image
+from tqdm import tqdm
+import os
+import glob
+from datasets import Image as HfImage
+
+# 加载数据集
+ds = load_dataset("svjack/HQ-Edit-Sample-2500")
+output_dir = "output_images"  # 设置输出路径
+os.makedirs(output_dir, exist_ok=True)  # 创建输出目录
+
+# 初始化Gradio客户端
+client = Client("http://127.0.0.1:7860/")
+
+# 获取已经处理过的文件索引（防止重复处理）
+processed_indices = set()
+for f in glob.glob(os.path.join(output_dir, "*_output.png")):
+    try:
+        idx = int(os.path.basename(f).split("_")[0])
+        processed_indices.add(idx)
+    except:
+        continue
+
+print(f"Found {len(processed_indices)} already processed files")
+
+# 处理所有样本（跳过已处理的）
+for i in tqdm(range(len(ds["train"])), desc="Processing images"):
+    if i in processed_indices:
+        continue  # 跳过已处理的
+    
+    try:
+        # 保存原始图像
+        input_path = os.path.join(output_dir, f"{i:05d}_input.png")
+        ds["train"][i]["start_image"].save(input_path)
+        
+        # 处理图像
+        result = client.predict(
+            image=handle_file(input_path),
+            prompt=ds["train"][i]["edit_prompt"],
+            show_thinking=False,
+            cfg_text_scale=4,
+            cfg_img_scale=2,
+            cfg_interval=0,
+            timestep_shift=3,
+            num_timesteps=50,
+            cfg_renorm_min=0,
+            cfg_renorm_type="text_channel",
+            max_think_token_n=1024,
+            do_sample=False,
+            text_temperature=0.3,
+            seed=0,
+            api_name="/process_edit_image"
+        )
+        
+        # 保存处理后的图像
+        output_path = os.path.join(output_dir, f"{i:05d}_output.png")
+        Image.open(result[0]).save(output_path)
+    except Exception as e:
+        print(f"Error processing sample {i}: {str(e)}")
+        continue
+
+# 构建新数据集（通过读取output_images目录）
+def create_new_dataset(original_ds, output_dir):
+    # 获取所有处理后的文件（按数字顺序）
+    output_files = sorted(
+        glob.glob(os.path.join(output_dir, "*_output.png")),
+        key=lambda x: int(os.path.basename(x).split("_")[0])
+    )
+    
+    # 获取对应的原始样本索引
+    indices = [int(os.path.basename(f).split("_")[0]) for f in output_files]
+    
+    # 选择对应的样本
+    selected_samples = original_ds["train"].select(indices)
+    
+    # 添加处理后的图像列
+    def add_processed_image(example, idx):
+        example["BAGEL_Edit_image"] = os.path.join(output_dir, f"{idx:05d}_output.png")
+        return example
+    
+    new_ds = selected_samples.map(add_processed_image, with_indices=True)
+    
+    # 转换图像列类型
+    new_ds = new_ds.cast_column("BAGEL_Edit_image", HfImage())
+    return new_ds
+
+new_dataset = create_new_dataset(ds, output_dir)
+print(f"Final dataset contains {len(new_dataset)} processed samples")
+```
+
 <p align="center">
   <img src="https://lf3-static.bytednsdoc.com/obj/eden-cn/nuhojubrps/banner.png" alt="BAGEL" width="480"/>
 </p>
