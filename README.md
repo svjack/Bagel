@@ -1,3 +1,5 @@
+# Refer to https://huggingface.co/meimeilook/BAGEL-7B-MoT-FP8
+
 <p align="center">
   <img src="https://lf3-static.bytednsdoc.com/obj/eden-cn/nuhojubrps/banner.png" alt="BAGEL" width="480"/>
 </p>
